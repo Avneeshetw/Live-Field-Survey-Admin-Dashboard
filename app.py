@@ -242,7 +242,6 @@ if active_file:
             if selected_hunter and surveyor_lat and surveyor_lon:
                 save_surveyor_live_loc(selected_hunter, surveyor_lat, surveyor_lon)
 
-            # Filter data strictly for the selected surveyor
             if selected_hunter and hunter_col in df_outlets.columns:
                 df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str).str.strip() == str(selected_hunter).strip()].copy()
             else:
@@ -477,18 +476,22 @@ if active_file:
                                     matched_col = next((c for c in df_filtered_outlets.columns if c.upper() == head_clean.upper()), None)
                                     default_val = str(out_data.get(matched_col, "")) if matched_col else ""
                                     
-                                    col_options = df_outlets[matched_col].dropna().astype(str).unique().tolist() if matched_col else []
-                                    if col_options:
-                                        if default_val in col_options:
-                                            default_idx = col_options.index(default_val)
-                                        else:
-                                            default_idx = 0
-                                        form_values[head_clean] = st.selectbox(head_clean, options=col_options, index=default_idx, key=f"sel_master_{head_clean}_{st.session_state.selected_outlet}")
+                                    # Fix: Sirf selected outlet/group name ko fix value ki tarah assign karein taaki dropdown na bane
+                                    if matched_col and matched_col.upper() == outlet_col.upper():
+                                        form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, disabled=True, key=f"inp_fixed_{head_clean}_{st.session_state.selected_outlet}")
                                     else:
-                                        form_values[head_clean] = st.text_input(head_clean, value=default_val, key=f"inp_{head_clean}_{st.session_state.selected_outlet}")
+                                        col_options = df_outlets[matched_col].dropna().astype(str).unique().tolist() if matched_col else []
+                                        if col_options:
+                                            if default_val in col_options:
+                                                default_idx = col_options.index(default_val)
+                                            else:
+                                                default_idx = 0
+                                            form_values[head_clean] = st.selectbox(head_clean, options=col_options, index=default_idx, key=f"sel_master_{head_clean}_{st.session_state.selected_outlet}")
+                                        else:
+                                            form_values[head_clean] = st.text_input(head_clean, value=default_val, key=f"inp_{head_clean}_{st.session_state.selected_outlet}")
 
                                 elif "outlet name" in head_lower or "group" in head_lower:
-                                    form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, key=f"inp_outname_{st.session_state.selected_outlet}")
+                                    form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, disabled=True, key=f"inp_outname_{st.session_state.selected_outlet}")
 
                                 elif head_lower == "channel name":
                                     c_options = list(channel_hierarchy.keys()) if channel_hierarchy else master_dropdowns.get("Channel Name", ["General"])
