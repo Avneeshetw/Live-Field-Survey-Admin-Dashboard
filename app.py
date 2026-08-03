@@ -15,6 +15,7 @@ st.set_page_config(page_title="FMCG Live Survey Portal", layout="wide")
 
 MASTER_FILE_PATH = "master_questions.xlsx"
 SURVEY_FILE = "survey_responses.xlsx"
+SURVEYOR_LOC_FILE = "surveyor_live_locations.xlsx"
 IMAGE_FOLDER = "survey_images"
 
 LOGO_FILES = ["drishti_logo.png", "logo.png", "drishti.png", "drishti_logo.jpg", "logo.jpg"]
@@ -59,6 +60,36 @@ def load_survey_data():
         except Exception:
             return pd.DataFrame()
     return pd.DataFrame()
+
+@st.cache_data(ttl=2)
+def load_surveyor_locs():
+    if os.path.exists(SURVEYOR_LOC_FILE):
+        try:
+            return pd.read_excel(SURVEYOR_LOC_FILE)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def save_surveyor_live_loc(surveyor_name, lat, lon):
+    if not surveyor_name or not lat or not lon:
+        return
+    df_new = pd.DataFrame([{
+        "Surveyor Name": surveyor_name,
+        "Latitude": lat,
+        "Longitude": lon,
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }])
+    if os.path.exists(SURVEYOR_LOC_FILE):
+        try:
+            df_old = pd.read_excel(SURVEYOR_LOC_FILE)
+            # Remove older entry of same surveyor to keep only latest live location
+            df_old = df_old[df_old["Surveyor Name"].astype(str) != str(surveyor_name)]
+            df_final = pd.concat([df_old, df_new], ignore_index=True)
+        except Exception:
+            df_final = df_new
+    else:
+        df_final = df_new
+    df_final.to_excel(SURVEYOR_LOC_FILE, index=False)
 
 @st.cache_data
 def load_excel_sheets(file):
@@ -208,6 +239,10 @@ if active_file:
         if is_surveyor_mode or app_mode == "📱 Surveyor Mode Preview":
 
             selected_hunter = st.selectbox("👤 Select Your Name (Surveyor)", options=hunter_list)
+
+            # Automatically save surveyor live location as soon as they select their name
+            if selected_hunter and surveyor_lat and surveyor_lon:
+                save_surveyor_live_loc(selected_hunter, surveyor_lat, surveyor_lon)
 
             if selected_hunter:
                 df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str) == selected_hunter].copy()
@@ -429,7 +464,6 @@ if active_file:
                                 head_clean = col_heading.strip()
                                 head_lower = head_clean.lower()
 
-                                # HIDE EDS ID LOCATION FIELD COMPLETELY FROM FORM VIEW (Automatic background save)
                                 if "eds id location" in head_lower:
                                     form_values[head_clean] = f"{surveyor_lat},{surveyor_lon}" if surveyor_lat else str(out_data.get("EDS Id Location", "GPS Not Locked"))
                                     continue
@@ -447,7 +481,6 @@ if active_file:
                                     matched_col = next((c for c in df_filtered_outlets.columns if c.upper() == head_clean.upper()), None)
                                     default_val = str(out_data.get(matched_col, "")) if matched_col else ""
                                     
-                                    # MAKE MASTER COLUMNS SELECTABLE / FILLABLE (Instead of rigid Auto-filled text box)
                                     col_options = df_outlets[matched_col].dropna().astype(str).unique().tolist() if matched_col else []
                                     if col_options:
                                         if default_val in col_options:
@@ -586,7 +619,6 @@ if active_file:
             st.markdown("---")
 
             st.subheader("🔗 Quick Application Access Links")
-            # LIVE APP URL SET AS DEFAULT HERE
             base_url = st.text_input("🌐 App Base URL (Streamlit Cloud / Localhost)", value="https://live-field-survey-app.streamlit.app", key="base_url_input")
 
             admin_url = f"{base_url.strip('/')}/"
@@ -616,13 +648,34 @@ if active_file:
 
             adm_map = folium.Map(location=[26.8941, 80.9584], zoom_start=13)
 
+            # Show Admin GPS
             if surveyor_lat and surveyor_lon:
                 folium.Marker(
                     [surveyor_lat, surveyor_lon],
-                    popup="<b>📍 Active Surveyor Current GPS Location</b>",
-                    tooltip="Surveyor Live Position",
+                    popup="<b>📍 Admin Current GPS Location</b>",
+                    tooltip="Admin Position",
                     icon=folium.Icon(color="blue", icon="user", prefix="fa")
                 ).add_to(adm_map)
+
+            # Show All Active Surveyors Live Locations on Map
+            df_s_locs = load_surveyor_locs()
+            if not df_s_locs.empty:
+                for _, s_row in df_s_locs.iterrows():
+                    s_name = str(s_row.get("Surveyor Name", ""))
+                    s_lat = s_row.get("Latitude")
+                    s_lon = s_row.get("Longitude")
+                    s_time = str(s_row.get("Timestamp", ""))
+
+                    if selected_admin_hunter != "All Surveyors" and s_name != selected_admin_hunter:
+                        continue
+
+                    if pd.notna(s_lat) and pd.notna(s_lon):
+                        folium.Marker(
+                            [float(s_lat), float(s_lon)],
+                            popup=f"<b>👤 Surveyor: {s_name}</b><br>Last Seen: {s_time}<br><span style='color:blue;'><b>Active Live Location</b></span>",
+                            tooltip=f"Surveyor: {s_name} (Active)",
+                            icon=folium.Icon(color="purple", icon="user", prefix="fa")
+                        ).add_to(adm_map)
 
             if map_status_filter != "📍 Surveyor Live Location Only":
                 for idx, row in adm_outlets.iterrows():
