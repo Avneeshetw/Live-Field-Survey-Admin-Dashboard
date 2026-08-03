@@ -586,7 +586,8 @@ if active_file:
             st.markdown("---")
 
             st.subheader("🔗 Quick Application Access Links")
-            base_url = st.text_input("🌐 App Base URL (Streamlit Cloud / Localhost)", value="http://localhost:8501", key="base_url_input")
+            # LIVE APP URL SET AS DEFAULT HERE
+            base_url = st.text_input("🌐 App Base URL (Streamlit Cloud / Localhost)", value="https://live-field-survey-app.streamlit.app", key="base_url_input")
 
             admin_url = f"{base_url.strip('/')}/"
             surveyor_url = f"{base_url.strip('/')}/?mode=surveyor"
