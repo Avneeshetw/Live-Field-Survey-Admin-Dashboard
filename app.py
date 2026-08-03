@@ -15,7 +15,6 @@ st.set_page_config(page_title="FMCG Live Survey Portal", layout="wide")
 
 MASTER_FILE_PATH = "master_questions.xlsx"
 SURVEY_FILE = "survey_responses.xlsx"
-SURVEYOR_LOC_FILE = "surveyor_live_locations.xlsx"
 IMAGE_FOLDER = "survey_images"
 
 LOGO_FILES = ["drishti_logo.png", "logo.png", "drishti.png", "drishti_logo.jpg", "logo.jpg"]
@@ -43,12 +42,6 @@ if "temp_form_data" not in st.session_state:
 if "order_item_count" not in st.session_state:
     st.session_state.order_item_count = 1
 
-if "just_submitted" not in st.session_state:
-    st.session_state.just_submitted = False
-
-if "last_submitted_outlet" not in st.session_state:
-    st.session_state.last_submitted_outlet = ""
-
 # -----------------------------------------------------------------------------
 # Fast Caching & Data Helpers
 # -----------------------------------------------------------------------------
@@ -61,35 +54,6 @@ def load_survey_data():
             return pd.DataFrame()
     return pd.DataFrame()
 
-@st.cache_data(ttl=2)
-def load_surveyor_locs():
-    if os.path.exists(SURVEYOR_LOC_FILE):
-        try:
-            return pd.read_excel(SURVEYOR_LOC_FILE)
-        except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-def save_surveyor_live_loc(surveyor_name, lat, lon):
-    if not surveyor_name or not lat or not lon:
-        return
-    df_new = pd.DataFrame([{
-        "Surveyor Name": surveyor_name,
-        "Latitude": lat,
-        "Longitude": lon,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }])
-    if os.path.exists(SURVEYOR_LOC_FILE):
-        try:
-            df_old = pd.read_excel(SURVEYOR_LOC_FILE)
-            df_old = df_old[df_old["Surveyor Name"].astype(str) != str(surveyor_name)]
-            df_final = pd.concat([df_old, df_new], ignore_index=True)
-        except Exception:
-            df_final = df_new
-    else:
-        df_final = df_new
-    df_final.to_excel(SURVEYOR_LOC_FILE, index=False)
-
 @st.cache_data
 def load_excel_sheets(file):
     excel_file = pd.ExcelFile(file)
@@ -100,7 +64,7 @@ def load_excel_sheets(file):
 
 saved_responses_df = load_survey_data()
 if not saved_responses_df.empty:
-    col_out = next((c for c in saved_responses_df.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), None)
+    col_out = next((c for c in saved_responses_df.columns if "OUTLET" in c.upper()), None)
     if col_out:
         st.session_state.surveys_completed = set(saved_responses_df[col_out].dropna().astype(str).tolist())
 
@@ -226,7 +190,7 @@ if active_file:
             return None, None
 
         df_outlets['out_lat'], df_outlets['out_lon'] = zip(*df_outlets.apply(extract_coords, axis=1))
-        outlet_col = next((c for c in df_outlets.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), df_outlets.columns[0])
+        outlet_col = next((c for c in df_outlets.columns if "OUTLET" in c.upper()), df_outlets.columns[0])
 
         header_title = "FMCG Field Survey Portal" if (is_surveyor_mode or app_mode == "📱 Surveyor Mode Preview") else "Live Field Survey Admin Dashboard"
         st.markdown(f"<h1 style='margin:0; padding-top: 0px; margin-bottom: 10px; font-size: 2.1rem;'>{header_title}</h1>", unsafe_allow_html=True)
@@ -239,21 +203,18 @@ if active_file:
 
             selected_hunter = st.selectbox("👤 Select Your Name (Surveyor)", options=hunter_list)
 
-            if selected_hunter and surveyor_lat and surveyor_lon:
-                save_surveyor_live_loc(selected_hunter, surveyor_lat, surveyor_lon)
-
-            if selected_hunter and hunter_col in df_outlets.columns:
-                df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str).str.strip() == str(selected_hunter).strip()].copy()
+            if selected_hunter:
+                df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str) == selected_hunter].copy()
             else:
                 df_filtered_outlets = df_outlets.copy()
 
-            if surveyor_lat and surveyor_lon and not df_filtered_outlets.empty:
+            if surveyor_lat and surveyor_lon:
                 df_filtered_outlets['distance_km'] = df_filtered_outlets.apply(
                     lambda r: calculate_distance_km(surveyor_lat, surveyor_lon, r['out_lat'], r['out_lon']), axis=1
                 )
                 df_filtered_outlets = df_filtered_outlets.sort_values(by='distance_km').reset_index(drop=True)
 
-            outlet_list = df_filtered_outlets[outlet_col].dropna().astype(str).unique().tolist() if not df_filtered_outlets.empty else []
+            outlet_list = df_filtered_outlets[outlet_col].dropna().astype(str).unique().tolist()
 
             pending_outlets_df = df_filtered_outlets[~df_filtered_outlets[outlet_col].astype(str).isin(st.session_state.surveys_completed)]
             suggested_outlet_name = None
@@ -267,7 +228,7 @@ if active_file:
 
             if suggested_outlet_name:
                 dist_str = f" ({suggested_distance})" if suggested_distance else ""
-                st.info(f"💡 **Suggested Next Target:** `{suggested_outlet_name}`{dist_str}")
+                st.info(f"💡 **Suggested Next Outlet:** `{suggested_outlet_name}`{dist_str}")
 
             if not st.session_state.selected_outlet or st.session_state.selected_outlet not in outlet_list:
                 st.session_state.selected_outlet = suggested_outlet_name if suggested_outlet_name else (outlet_list[0] if outlet_list else None)
@@ -276,12 +237,11 @@ if active_file:
                 st.session_state.selected_outlet = st.session_state.outlet_selectbox_widget
                 st.session_state.form_step = 1
                 st.session_state.order_item_count = 1
-                st.session_state.just_submitted = False
 
             col_left, col_right = st.columns([1.1, 1.2])
 
             with col_left:
-                st.subheader("🗺️ Target Map & Navigation")
+                st.subheader("🗺️ Outlet Map & Navigation")
                 
                 cur_match = df_filtered_outlets[df_filtered_outlets[outlet_col].astype(str) == st.session_state.selected_outlet]
                 if not cur_match.empty:
@@ -311,7 +271,7 @@ if active_file:
                     ).add_to(m)
 
                 for idx, row in df_filtered_outlets.iterrows():
-                    out_name = str(row.get(outlet_col, f"Target_{idx}"))
+                    out_name = str(row.get(outlet_col, f"Outlet_{idx}"))
                     lat, lon = row['out_lat'], row['out_lon']
 
                     if pd.notna(lat) and pd.notna(lon):
@@ -385,220 +345,186 @@ if active_file:
                         st.session_state.selected_outlet = clicked_point_name
                         st.session_state.form_step = 1
                         st.session_state.order_item_count = 1
-                        st.session_state.just_submitted = False
                         st.rerun()
 
             with col_right:
                 st.subheader(f"📝 Dynamic Survey Form ({selected_hunter})")
 
-                if st.session_state.just_submitted:
-                    st.success(f"🎉 **Success!** Data for `{st.session_state.last_submitted_outlet}` successfully submitted and saved.")
-                    st.info("🗺️ Map and Form have automatically moved to the next suggested target.")
-                    
-                    if st.button("👉 Go to Next Survey Target", use_container_width=True):
-                        st.session_state.just_submitted = False
-                        st.session_state.selected_outlet = suggested_outlet_name if suggested_outlet_name else (outlet_list[0] if outlet_list else None)
-                        st.session_state.form_step = 1
-                        st.session_state.order_item_count = 1
-                        st.rerun()
+                try:
+                    curr_idx = outlet_list.index(st.session_state.selected_outlet)
+                except ValueError:
+                    curr_idx = 0
+
+                selected_outlet = st.selectbox(
+                    "Select Target Outlet",
+                    options=outlet_list,
+                    index=curr_idx,
+                    key="outlet_selectbox_widget",
+                    on_change=sync_outlet_selection
+                )
+
+                matched_rows = df_filtered_outlets[df_filtered_outlets[outlet_col].astype(str) == st.session_state.selected_outlet]
+                if not matched_rows.empty:
+                    out_data = matched_rows.iloc[0]
                 else:
-                    try:
-                        curr_idx = outlet_list.index(st.session_state.selected_outlet)
-                    except ValueError:
-                        curr_idx = 0
+                    out_data = df_filtered_outlets.iloc[0]
 
-                    selected_outlet = st.selectbox(
-                        "Select Target Group / Outlet",
-                        options=outlet_list,
-                        index=curr_idx,
-                        key="outlet_selectbox_widget",
-                        on_change=sync_outlet_selection
-                    )
-
-                    matched_rows = df_filtered_outlets[df_filtered_outlets[outlet_col].astype(str) == st.session_state.selected_outlet]
-                    if not matched_rows.empty:
-                        out_data = matched_rows.iloc[0]
+                sel_lat = out_data.get('out_lat', None)
+                sel_lon = out_data.get('out_lon', None)
+                
+                if pd.notna(sel_lat) and pd.notna(sel_lon):
+                    if surveyor_lat and surveyor_lon:
+                        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={surveyor_lat},{surveyor_lon}&destination={sel_lat},{sel_lon}&travelmode=driving"
                     else:
-                        out_data = df_filtered_outlets.iloc[0]
-
-                    sel_lat = out_data.get('out_lat', None)
-                    sel_lon = out_data.get('out_lon', None)
+                        gmaps_url = f"https://www.google.com/maps/dir/?api=1&destination={sel_lat},{sel_lon}"
                     
-                    if pd.notna(sel_lat) and pd.notna(sel_lon):
-                        if surveyor_lat and surveyor_lon:
-                            gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={surveyor_lat},{surveyor_lon}&destination={sel_lat},{sel_lon}&travelmode=driving"
-                        else:
-                            gmaps_url = f"https://www.google.com/maps/dir/?api=1&destination={sel_lat},{sel_lon}"
-                        
-                        st.link_button("🗺️ Open Google Maps Route Navigation", gmaps_url, use_container_width=True)
+                    st.link_button("🗺️ Open Google Maps Route Navigation", gmaps_url, use_container_width=True)
 
-                    if 'distance_km' in out_data and out_data['distance_km'] < 9000:
-                        st.caption(f"📏 Live Distance to Target: **{out_data['distance_km']:.2f} km**")
+                if 'distance_km' in out_data and out_data['distance_km'] < 9000:
+                    st.caption(f"📏 Live Distance to Selected Outlet: **{out_data['distance_km']:.2f} km**")
 
-                    if st.session_state.form_step == 1:
-                        with st.form(key=f"dynamic_form_{st.session_state.selected_outlet}", clear_on_submit=False):
-                            form_values = {}
+                if st.session_state.form_step == 1:
+                    with st.form(key=f"dynamic_form_{st.session_state.selected_outlet}", clear_on_submit=False):
+                        form_values = {}
 
-                            channel_hierarchy = {}
-                            if "Channel Sub Channel" in sheet_names:
-                                csc_df = sheets_dict["Channel Sub Channel"].copy()
-                                csc_df.columns = csc_df.columns.str.strip()
-                                if "Channel Name" in csc_df.columns and "Sub Channel Name" in csc_df.columns:
-                                    for c_val, group in csc_df.groupby("Channel Name"):
-                                        channel_hierarchy[str(c_val).strip()] = group["Sub Channel Name"].dropna().astype(str).str.strip().tolist()
+                        channel_hierarchy = {}
+                        if "Channel Sub Channel" in sheet_names:
+                            csc_df = sheets_dict["Channel Sub Channel"].copy()
+                            csc_df.columns = csc_df.columns.str.strip()
+                            if "Channel Name" in csc_df.columns and "Sub Channel Name" in csc_df.columns:
+                                for c_val, group in csc_df.groupby("Channel Name"):
+                                    channel_hierarchy[str(c_val).strip()] = group["Sub Channel Name"].dropna().astype(str).str.strip().tolist()
 
-                            products_list = master_dropdowns.get("Products", master_dropdowns.get("Product ", []))
+                        products_list = master_dropdowns.get("Products", master_dropdowns.get("Product ", []))
 
-                            form_values[hunter_col] = selected_hunter
+                        form_values[hunter_col] = selected_hunter
 
-                            order_processed = False
-                            quantity_processed = False
-                            amount_processed = False
+                        order_processed = False
+                        quantity_processed = False
+                        amount_processed = False
 
-                            for col_heading in df_he_columns:
-                                head_clean = col_heading.strip()
-                                head_lower = head_clean.lower()
+                        for col_heading in df_he_columns:
+                            head_clean = col_heading.strip()
+                            head_lower = head_clean.lower()
 
-                                if "eds id location" in head_lower:
-                                    form_values[head_clean] = f"{surveyor_lat},{surveyor_lon}" if surveyor_lat else str(out_data.get("EDS Id Location", "GPS Not Locked"))
+                            if head_lower in ["id"]:
+                                form_values[head_clean] = f"SURVEY_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            elif head_lower in ["date"]:
+                                form_values[head_clean] = datetime.now().strftime("%Y-%m-%d")
+                            elif head_lower in ["time"]:
+                                form_values[head_clean] = datetime.now().strftime("%H:%M:%S")
+                            elif head_lower in ["location"]:
+                                form_values[head_clean] = f"{surveyor_lat},{surveyor_lon}" if surveyor_lat else "GPS Not Locked"
+
+                            elif head_clean in df_filtered_outlets.columns or head_clean.upper() in [c.upper() for c in df_filtered_outlets.columns]:
+                                matched_col = next((c for c in df_filtered_outlets.columns if c.upper() == head_clean.upper()), None)
+                                val = str(out_data.get(matched_col, "")) if matched_col else ""
+                                form_values[head_clean] = st.text_input(f"{head_clean} (Auto-filled)", value=val, key=f"inp_{head_clean}_{st.session_state.selected_outlet}")
+
+                            elif "outlet name" in head_lower:
+                                form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, key=f"inp_outname_{st.session_state.selected_outlet}")
+
+                            elif head_lower == "channel name":
+                                c_options = list(channel_hierarchy.keys()) if channel_hierarchy else master_dropdowns.get("Channel Name", ["General"])
+                                form_values[head_clean] = st.selectbox(head_clean, options=c_options, key=f"chan_{st.session_state.selected_outlet}")
+
+                            elif head_lower == "sub channel name":
+                                sel_chan = st.session_state.get(f"chan_{st.session_state.selected_outlet}", None)
+                                sub_opts = channel_hierarchy.get(sel_chan, []) if sel_chan else master_dropdowns.get("Sub Channel Name", ["General"])
+                                if not sub_opts:
+                                    sub_opts = master_dropdowns.get("Sub Channel Name", ["General"])
+                                form_values[head_clean] = st.selectbox(head_clean, options=sub_opts, key=f"subchan_{st.session_state.selected_outlet}")
+
+                            elif any(k in head_lower for k in ["multi", "brands", "available products", "issues", "services"]):
+                                dropdown_opts = master_dropdowns.get(head_clean, products_list if products_list else ["Option 1", "Option 2"])
+                                selected_items = st.multiselect(f"{head_clean} (Multi-select)", options=dropdown_opts, key=f"multi_{head_clean}_{st.session_state.selected_outlet}")
+                                form_values[head_clean] = ", ".join(selected_items) if selected_items else "None"
+
+                            elif "order" in head_lower or "product" in head_lower:
+                                if not order_processed:
+                                    order_processed = True
+                                    order_items_collected = []
+                                    for i in range(st.session_state.order_item_count):
+                                        if products_list:
+                                            item_val = st.selectbox(f"Order Item #{i+1}", options=["None"] + products_list, key=f"prod_{head_clean}_{i}_{st.session_state.selected_outlet}")
+                                        else:
+                                            item_val = st.text_input(f"Order Item #{i+1}", key=f"txt_{head_clean}_{i}_{st.session_state.selected_outlet}")
+                                        if item_val and item_val != "None":
+                                            order_items_collected.append(item_val)
+                                    
+                                    form_values[head_clean] = ", ".join(order_items_collected) if order_items_collected else "None"
+                                else:
                                     continue
 
-                                if head_lower in ["id"]:
-                                    form_values[head_clean] = f"SURVEY_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                                elif head_lower in ["date"]:
-                                    form_values[head_clean] = datetime.now().strftime("%Y-%m-%d")
-                                elif head_lower in ["time"]:
-                                    form_values[head_clean] = datetime.now().strftime("%H:%M:%S")
-                                elif head_lower in ["location"]:
-                                    form_values[head_clean] = f"{surveyor_lat},{surveyor_lon}" if surveyor_lat else "GPS Not Locked"
-
-                                elif head_clean in df_filtered_outlets.columns or head_clean.upper() in [c.upper() for c in df_filtered_outlets.columns]:
-                                    matched_col = next((c for c in df_filtered_outlets.columns if c.upper() == head_clean.upper()), None)
-                                    default_val = str(out_data.get(matched_col, "")) if matched_col else ""
-                                    
-                                    # Fix: Sirf selected outlet/group name ko fix value ki tarah assign karein taaki dropdown na bane
-                                    if matched_col and matched_col.upper() == outlet_col.upper():
-                                        form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, disabled=True, key=f"inp_fixed_{head_clean}_{st.session_state.selected_outlet}")
-                                    else:
-                                        col_options = df_outlets[matched_col].dropna().astype(str).unique().tolist() if matched_col else []
-                                        if col_options:
-                                            if default_val in col_options:
-                                                default_idx = col_options.index(default_val)
-                                            else:
-                                                default_idx = 0
-                                            form_values[head_clean] = st.selectbox(head_clean, options=col_options, index=default_idx, key=f"sel_master_{head_clean}_{st.session_state.selected_outlet}")
-                                        else:
-                                            form_values[head_clean] = st.text_input(head_clean, value=default_val, key=f"inp_{head_clean}_{st.session_state.selected_outlet}")
-
-                                elif "outlet name" in head_lower or "group" in head_lower:
-                                    form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, disabled=True, key=f"inp_outname_{st.session_state.selected_outlet}")
-
-                                elif head_lower == "channel name":
-                                    c_options = list(channel_hierarchy.keys()) if channel_hierarchy else master_dropdowns.get("Channel Name", ["General"])
-                                    form_values[head_clean] = st.selectbox(head_clean, options=c_options, key=f"chan_{st.session_state.selected_outlet}")
-
-                                elif head_lower == "sub channel name":
-                                    sel_chan = st.session_state.get(f"chan_{st.session_state.selected_outlet}", None)
-                                    sub_opts = channel_hierarchy.get(sel_chan, []) if sel_chan else master_dropdowns.get("Sub Channel Name", ["General"])
-                                    if not sub_opts:
-                                        sub_opts = master_dropdowns.get("Sub Channel Name", ["General"])
-                                    form_values[head_clean] = st.selectbox(head_clean, options=sub_opts, key=f"subchan_{st.session_state.selected_outlet}")
-
-                                elif any(k in head_lower for k in ["multi", "brands", "available products", "issues", "services"]):
-                                    dropdown_opts = master_dropdowns.get(head_clean, products_list if products_list else ["Option 1", "Option 2"])
-                                    selected_items = st.multiselect(f"{head_clean} (Multi-select)", options=dropdown_opts, key=f"multi_{head_clean}_{st.session_state.selected_outlet}")
-                                    form_values[head_clean] = ", ".join(selected_items) if selected_items else "None"
-
-                                elif "order" in head_lower or "product" in head_lower:
-                                    if not order_processed:
-                                        order_processed = True
-                                        order_items_collected = []
-                                        for i in range(st.session_state.order_item_count):
-                                            if products_list:
-                                                item_val = st.selectbox(f"Order Item #{i+1}", options=["None"] + products_list, key=f"prod_{head_clean}_{i}_{st.session_state.selected_outlet}")
-                                            else:
-                                                item_val = st.text_input(f"Order Item #{i+1}", key=f"txt_{head_clean}_{i}_{st.session_state.selected_outlet}")
-                                            if item_val and item_val != "None":
-                                                order_items_collected.append(item_val)
-                                        
-                                        form_values[head_clean] = ", ".join(order_items_collected) if order_items_collected else "None"
-                                    else:
-                                        continue
-
-                                elif "quantity" in head_lower or "qty" in head_lower:
-                                    if not quantity_processed:
-                                        quantity_processed = True
-                                        form_values[head_clean] = st.number_input(head_clean, min_value=0, step=1, key=f"num_{head_clean}_{st.session_state.selected_outlet}")
-                                    else:
-                                        continue
-
-                                elif "amount" in head_lower or "price" in head_lower or "value" in head_lower:
-                                    if not amount_processed:
-                                        amount_processed = True
-                                        form_values[head_clean] = st.number_input(head_clean, min_value=0.0, step=10.0, key=f"amt_{head_clean}_{st.session_state.selected_outlet}")
-                                    else:
-                                        continue
-
-                                elif "image" in head_lower or "photo" in head_lower or "shop image" in head_lower:
-                                    pass
-
+                            elif "quantity" in head_lower or "qty" in head_lower:
+                                if not quantity_processed:
+                                    quantity_processed = True
+                                    form_values[head_clean] = st.number_input(head_clean, min_value=0, step=1, key=f"num_{head_clean}_{st.session_state.selected_outlet}")
                                 else:
-                                    dropdown_opts = None
-                                    for key, opt_list in master_dropdowns.items():
-                                        if key.lower().replace(" ", "").replace("_", "") in head_lower.replace(" ", "").replace("_", ""):
-                                            dropdown_opts = opt_list
-                                            break
+                                    continue
 
-                                    if dropdown_opts:
-                                        form_values[head_clean] = st.selectbox(head_clean, options=dropdown_opts, key=f"opt_{head_clean}_{st.session_state.selected_outlet}")
-                                    else:
-                                        form_values[head_clean] = st.text_input(head_clean, key=f"txtin_{head_clean}_{st.session_state.selected_outlet}")
+                            elif "amount" in head_lower or "price" in head_lower or "value" in head_lower:
+                                if not amount_processed:
+                                    amount_processed = True
+                                    form_values[head_clean] = st.number_input(head_clean, min_value=0.0, step=10.0, key=f"amt_{head_clean}_{st.session_state.selected_outlet}")
+                                else:
+                                    continue
 
-                            proceed_btn = st.form_submit_button("📸 Submit Form & Open Camera", use_container_width=True)
+                            elif "image" in head_lower or "photo" in head_lower or "shop image" in head_lower:
+                                pass
 
-                            if proceed_btn:
-                                st.session_state.temp_form_data = form_values
-                                st.session_state.form_step = 2
-                                st.rerun()
+                            else:
+                                dropdown_opts = None
+                                for key, opt_list in master_dropdowns.items():
+                                    if key.lower().replace(" ", "").replace("_", "") in head_lower.replace(" ", "").replace("_", ""):
+                                        dropdown_opts = opt_list
+                                        break
 
-                        if st.button("➕ Add Another Order Item"):
-                            st.session_state.order_item_count += 1
+                                if dropdown_opts:
+                                    form_values[head_clean] = st.selectbox(head_clean, options=dropdown_opts, key=f"opt_{head_clean}_{st.session_state.selected_outlet}")
+                                else:
+                                    form_values[head_clean] = st.text_input(head_clean, key=f"txtin_{head_clean}_{st.session_state.selected_outlet}")
+
+                        proceed_btn = st.form_submit_button("📸 Submit Form & Open Camera", use_container_width=True)
+
+                        if proceed_btn:
+                            st.session_state.temp_form_data = form_values
+                            st.session_state.form_step = 2
                             st.rerun()
 
-                    elif st.session_state.form_step == 2:
-                        st.success("✅ Form data recorded! Capture store photo to finalize.")
-                        captured_img = st.camera_input("📷 Take Photo Now to Finalize", key=f"camera_step2_{st.session_state.selected_outlet}")
+                    if st.button("➕ Add Another Order Item"):
+                        st.session_state.order_item_count += 1
+                        st.rerun()
 
-                        c_btn1, c_btn2 = st.columns(2)
-                        with c_btn1:
-                            if st.button("⬅️ Back to Form Edit", use_container_width=True):
-                                st.session_state.form_step = 1
-                                st.rerun()
+                elif st.session_state.form_step == 2:
+                    st.success("✅ Form data recorded! Capture store photo to finalize the survey.")
+                    captured_img = st.camera_input("📷 Take Photo Now to Finalize", key=f"camera_step2_{st.session_state.selected_outlet}")
 
-                        if captured_img:
-                            final_data = st.session_state.temp_form_data.copy()
-                            img_col = next((c for c in df_he_columns if "image" in c.lower() or "photo" in c.lower()), "Shop Image")
-
-                            img_filename = f"{st.session_state.selected_outlet}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                            img_path = os.path.join(IMAGE_FOLDER, img_filename)
-                            image = Image.open(captured_img)
-                            image.save(img_path)
-                            final_data[img_col] = img_filename
-
-                            save_survey_data(final_data)
-                            
-                            completed_outlet_name = st.session_state.selected_outlet
-                            st.session_state.surveys_completed.add(completed_outlet_name)
-                            
-                            temp_pending_df = df_filtered_outlets[~df_filtered_outlets[outlet_col].astype(str).isin(st.session_state.surveys_completed)]
-                            next_suggested = str(temp_pending_df.iloc[0][outlet_col]) if not temp_pending_df.empty else outlet_list[0]
-
-                            st.session_state.last_submitted_outlet = completed_outlet_name
-                            st.session_state.selected_outlet = next_suggested
+                    c_btn1, c_btn2 = st.columns(2)
+                    with c_btn1:
+                        if st.button("⬅️ Back to Form Edit", use_container_width=True):
                             st.session_state.form_step = 1
-                            st.session_state.order_item_count = 1
-                            st.session_state.just_submitted = True
                             st.rerun()
+
+                    if captured_img:
+                        final_data = st.session_state.temp_form_data.copy()
+                        img_col = next((c for c in df_he_columns if "image" in c.lower() or "photo" in c.lower()), "Shop Image")
+
+                        img_filename = f"{st.session_state.selected_outlet}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                        img_path = os.path.join(IMAGE_FOLDER, img_filename)
+                        image = Image.open(captured_img)
+                        image.save(img_path)
+                        final_data[img_col] = img_filename
+
+                        save_survey_data(final_data)
+                        st.session_state.surveys_completed.add(st.session_state.selected_outlet)
+                        
+                        st.success(f"🎉 Survey for '{st.session_state.selected_outlet}' completed!")
+
+                        st.session_state.form_step = 1
+                        st.session_state.selected_outlet = None
+                        st.session_state.order_item_count = 1
+                        st.rerun()
 
         # =====================================================================
         # MODE 2: ADMIN LIVE DASHBOARD
@@ -610,15 +536,17 @@ if active_file:
             completion_rate = (current_completed / total_outlets * 100) if total_outlets > 0 else 0
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("📍 Total Targets", f"{total_outlets}")
+            m1.metric("📍 Total Outlets", f"{total_outlets}")
             m2.metric("✅ Completed Surveys", f"{current_completed}", delta=f"{completion_rate:.1f}% Done")
-            m3.metric("⏳ Pending Targets", f"{current_pending}")
+            m3.metric("⏳ Pending Outlets", f"{current_pending}")
             m4.metric("👥 Total Surveyors", f"{len(hunter_list)}")
 
             st.markdown("---")
 
             st.subheader("🔗 Quick Application Access Links")
-            base_url = st.text_input("🌐 App Base URL (Streamlit Cloud / Localhost)", value="https://live-field-survey-app.streamlit.app", key="base_url_input")
+            st.info("Aap in dono links ko copy karke use kar sakte hain. Surveyor link par click karke koi bhi surveyor apna naam select kar sakta hai.")
+
+            base_url = st.text_input("🌐 App Base URL (Streamlit Cloud / Localhost)", value="http://localhost:8501", key="base_url_input")
 
             admin_url = f"{base_url.strip('/')}/"
             surveyor_url = f"{base_url.strip('/')}/?mode=surveyor"
@@ -638,7 +566,7 @@ if active_file:
             with c_filter1:
                 selected_admin_hunter = st.selectbox("👤 Filter by Surveyor", options=["All Surveyors"] + hunter_list)
             with c_filter2:
-                map_status_filter = st.selectbox("📌 Filter Targets Status on Map", options=["Show All Points", "✅ Completed Points Only", "⏳ Pending Points Only", "📍 Surveyor Live Location Only"])
+                map_status_filter = st.selectbox("📌 Filter Outlets Status on Map", options=["Show All Points", "✅ Completed Points Only", "⏳ Pending Points Only", "📍 Surveyor Live Location Only"])
 
             if selected_admin_hunter != "All Surveyors":
                 adm_outlets = df_outlets[df_outlets[hunter_col].astype(str) == selected_admin_hunter]
@@ -650,33 +578,14 @@ if active_file:
             if surveyor_lat and surveyor_lon:
                 folium.Marker(
                     [surveyor_lat, surveyor_lon],
-                    popup="<b>📍 Admin Current GPS Location</b>",
-                    tooltip="Admin Position",
+                    popup="<b>📍 Active Surveyor Current GPS Location</b>",
+                    tooltip="Surveyor Live Position",
                     icon=folium.Icon(color="blue", icon="user", prefix="fa")
                 ).add_to(adm_map)
 
-            df_s_locs = load_surveyor_locs()
-            if not df_s_locs.empty:
-                for _, s_row in df_s_locs.iterrows():
-                    s_name = str(s_row.get("Surveyor Name", ""))
-                    s_lat = s_row.get("Latitude")
-                    s_lon = s_row.get("Longitude")
-                    s_time = str(s_row.get("Timestamp", ""))
-
-                    if selected_admin_hunter != "All Surveyors" and s_name != selected_admin_hunter:
-                        continue
-
-                    if pd.notna(s_lat) and pd.notna(s_lon):
-                        folium.Marker(
-                            [float(s_lat), float(s_lon)],
-                            popup=f"<b>👤 Surveyor: {s_name}</b><br>Last Seen: {s_time}<br><span style='color:blue;'><b>Active Live Location</b></span>",
-                            tooltip=f"Surveyor: {s_name} (Active)",
-                            icon=folium.Icon(color="purple", icon="user", prefix="fa")
-                        ).add_to(adm_map)
-
             if map_status_filter != "📍 Surveyor Live Location Only":
                 for idx, row in adm_outlets.iterrows():
-                    out_name = str(row.get(outlet_col, f"Target_{idx}"))
+                    out_name = str(row.get(outlet_col, f"Outlet_{idx}"))
                     h_owner = str(row.get(hunter_col, "Unknown"))
                     lat, lon = row['out_lat'], row['out_lon']
 
@@ -727,7 +636,7 @@ if active_file:
                         filtered_resp_df = filtered_resp_df[(filtered_resp_df[date_col] >= start_d) & (filtered_resp_df[date_col] <= end_d)]
 
             if not filtered_resp_df.empty:
-                resp_outlet_col = next((c for c in filtered_resp_df.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), None)
+                resp_outlet_col = next((c for c in filtered_resp_df.columns if "OUTLET" in c.upper()), None)
                 filtered_completed_set = set(filtered_resp_df[resp_outlet_col].dropna().astype(str).tolist()) if resp_outlet_col else set()
             else:
                 filtered_completed_set = set()
@@ -743,9 +652,9 @@ if active_file:
 
                 progress_data.append({
                     "Surveyor Name": h_name,
-                    "Total Assigned": h_total,
-                    "Completed ✅": h_done,
-                    "Pending ⏳": h_pending,
+                    "Total Outlets Assigned": h_total,
+                    "Completed Points ✅": h_done,
+                    "Pending Points ⏳": h_pending,
                     "Completion %": f"{h_pct:.1f}%"
                 })
 
