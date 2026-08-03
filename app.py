@@ -82,7 +82,6 @@ def save_surveyor_live_loc(surveyor_name, lat, lon):
     if os.path.exists(SURVEYOR_LOC_FILE):
         try:
             df_old = pd.read_excel(SURVEYOR_LOC_FILE)
-            # Remove older entry of same surveyor to keep only latest live location
             df_old = df_old[df_old["Surveyor Name"].astype(str) != str(surveyor_name)]
             df_final = pd.concat([df_old, df_new], ignore_index=True)
         except Exception:
@@ -101,7 +100,7 @@ def load_excel_sheets(file):
 
 saved_responses_df = load_survey_data()
 if not saved_responses_df.empty:
-    col_out = next((c for c in saved_responses_df.columns if "OUTLET" in c.upper()), None)
+    col_out = next((c for c in saved_responses_df.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), None)
     if col_out:
         st.session_state.surveys_completed = set(saved_responses_df[col_out].dropna().astype(str).tolist())
 
@@ -227,7 +226,7 @@ if active_file:
             return None, None
 
         df_outlets['out_lat'], df_outlets['out_lon'] = zip(*df_outlets.apply(extract_coords, axis=1))
-        outlet_col = next((c for c in df_outlets.columns if "OUTLET" in c.upper()), df_outlets.columns[0])
+        outlet_col = next((c for c in df_outlets.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), df_outlets.columns[0])
 
         header_title = "FMCG Field Survey Portal" if (is_surveyor_mode or app_mode == "📱 Surveyor Mode Preview") else "Live Field Survey Admin Dashboard"
         st.markdown(f"<h1 style='margin:0; padding-top: 0px; margin-bottom: 10px; font-size: 2.1rem;'>{header_title}</h1>", unsafe_allow_html=True)
@@ -240,22 +239,22 @@ if active_file:
 
             selected_hunter = st.selectbox("👤 Select Your Name (Surveyor)", options=hunter_list)
 
-            # Automatically save surveyor live location as soon as they select their name
             if selected_hunter and surveyor_lat and surveyor_lon:
                 save_surveyor_live_loc(selected_hunter, surveyor_lat, surveyor_lon)
 
-            if selected_hunter:
-                df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str) == selected_hunter].copy()
+            # Filter data strictly for the selected surveyor
+            if selected_hunter and hunter_col in df_outlets.columns:
+                df_filtered_outlets = df_outlets[df_outlets[hunter_col].astype(str).str.strip() == str(selected_hunter).strip()].copy()
             else:
                 df_filtered_outlets = df_outlets.copy()
 
-            if surveyor_lat and surveyor_lon:
+            if surveyor_lat and surveyor_lon and not df_filtered_outlets.empty:
                 df_filtered_outlets['distance_km'] = df_filtered_outlets.apply(
                     lambda r: calculate_distance_km(surveyor_lat, surveyor_lon, r['out_lat'], r['out_lon']), axis=1
                 )
                 df_filtered_outlets = df_filtered_outlets.sort_values(by='distance_km').reset_index(drop=True)
 
-            outlet_list = df_filtered_outlets[outlet_col].dropna().astype(str).unique().tolist()
+            outlet_list = df_filtered_outlets[outlet_col].dropna().astype(str).unique().tolist() if not df_filtered_outlets.empty else []
 
             pending_outlets_df = df_filtered_outlets[~df_filtered_outlets[outlet_col].astype(str).isin(st.session_state.surveys_completed)]
             suggested_outlet_name = None
@@ -269,7 +268,7 @@ if active_file:
 
             if suggested_outlet_name:
                 dist_str = f" ({suggested_distance})" if suggested_distance else ""
-                st.info(f"💡 **Suggested Next Outlet:** `{suggested_outlet_name}`{dist_str}")
+                st.info(f"💡 **Suggested Next Target:** `{suggested_outlet_name}`{dist_str}")
 
             if not st.session_state.selected_outlet or st.session_state.selected_outlet not in outlet_list:
                 st.session_state.selected_outlet = suggested_outlet_name if suggested_outlet_name else (outlet_list[0] if outlet_list else None)
@@ -283,7 +282,7 @@ if active_file:
             col_left, col_right = st.columns([1.1, 1.2])
 
             with col_left:
-                st.subheader("🗺️ Outlet Map & Navigation")
+                st.subheader("🗺️ Target Map & Navigation")
                 
                 cur_match = df_filtered_outlets[df_filtered_outlets[outlet_col].astype(str) == st.session_state.selected_outlet]
                 if not cur_match.empty:
@@ -313,7 +312,7 @@ if active_file:
                     ).add_to(m)
 
                 for idx, row in df_filtered_outlets.iterrows():
-                    out_name = str(row.get(outlet_col, f"Outlet_{idx}"))
+                    out_name = str(row.get(outlet_col, f"Target_{idx}"))
                     lat, lon = row['out_lat'], row['out_lon']
 
                     if pd.notna(lat) and pd.notna(lon):
@@ -393,14 +392,11 @@ if active_file:
             with col_right:
                 st.subheader(f"📝 Dynamic Survey Form ({selected_hunter})")
 
-                # =============================================================
-                # CONFIRMATION SCREEN AFTER SUBMISSION
-                # =============================================================
                 if st.session_state.just_submitted:
-                    st.success(f"🎉 **Success!** Survey for `{st.session_state.last_submitted_outlet}` successfully submitted and saved.")
-                    st.info("🗺️ Map and Form have automatically moved to the next suggested outlet.")
+                    st.success(f"🎉 **Success!** Data for `{st.session_state.last_submitted_outlet}` successfully submitted and saved.")
+                    st.info("🗺️ Map and Form have automatically moved to the next suggested target.")
                     
-                    if st.button("👉 Go to Next Outlet Survey", use_container_width=True):
+                    if st.button("👉 Go to Next Survey Target", use_container_width=True):
                         st.session_state.just_submitted = False
                         st.session_state.selected_outlet = suggested_outlet_name if suggested_outlet_name else (outlet_list[0] if outlet_list else None)
                         st.session_state.form_step = 1
@@ -413,7 +409,7 @@ if active_file:
                         curr_idx = 0
 
                     selected_outlet = st.selectbox(
-                        "Select Target Outlet",
+                        "Select Target Group / Outlet",
                         options=outlet_list,
                         index=curr_idx,
                         key="outlet_selectbox_widget",
@@ -438,7 +434,7 @@ if active_file:
                         st.link_button("🗺️ Open Google Maps Route Navigation", gmaps_url, use_container_width=True)
 
                     if 'distance_km' in out_data and out_data['distance_km'] < 9000:
-                        st.caption(f"📏 Live Distance to Selected Outlet: **{out_data['distance_km']:.2f} km**")
+                        st.caption(f"📏 Live Distance to Target: **{out_data['distance_km']:.2f} km**")
 
                     if st.session_state.form_step == 1:
                         with st.form(key=f"dynamic_form_{st.session_state.selected_outlet}", clear_on_submit=False):
@@ -491,7 +487,7 @@ if active_file:
                                     else:
                                         form_values[head_clean] = st.text_input(head_clean, value=default_val, key=f"inp_{head_clean}_{st.session_state.selected_outlet}")
 
-                                elif "outlet name" in head_lower:
+                                elif "outlet name" in head_lower or "group" in head_lower:
                                     form_values[head_clean] = st.text_input(head_clean, value=st.session_state.selected_outlet, key=f"inp_outname_{st.session_state.selected_outlet}")
 
                                 elif head_lower == "channel name":
@@ -567,7 +563,7 @@ if active_file:
                             st.rerun()
 
                     elif st.session_state.form_step == 2:
-                        st.success("✅ Form data recorded! Capture store photo to finalize the survey.")
+                        st.success("✅ Form data recorded! Capture store photo to finalize.")
                         captured_img = st.camera_input("📷 Take Photo Now to Finalize", key=f"camera_step2_{st.session_state.selected_outlet}")
 
                         c_btn1, c_btn2 = st.columns(2)
@@ -611,9 +607,9 @@ if active_file:
             completion_rate = (current_completed / total_outlets * 100) if total_outlets > 0 else 0
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("📍 Total Outlets", f"{total_outlets}")
+            m1.metric("📍 Total Targets", f"{total_outlets}")
             m2.metric("✅ Completed Surveys", f"{current_completed}", delta=f"{completion_rate:.1f}% Done")
-            m3.metric("⏳ Pending Outlets", f"{current_pending}")
+            m3.metric("⏳ Pending Targets", f"{current_pending}")
             m4.metric("👥 Total Surveyors", f"{len(hunter_list)}")
 
             st.markdown("---")
@@ -639,7 +635,7 @@ if active_file:
             with c_filter1:
                 selected_admin_hunter = st.selectbox("👤 Filter by Surveyor", options=["All Surveyors"] + hunter_list)
             with c_filter2:
-                map_status_filter = st.selectbox("📌 Filter Outlets Status on Map", options=["Show All Points", "✅ Completed Points Only", "⏳ Pending Points Only", "📍 Surveyor Live Location Only"])
+                map_status_filter = st.selectbox("📌 Filter Targets Status on Map", options=["Show All Points", "✅ Completed Points Only", "⏳ Pending Points Only", "📍 Surveyor Live Location Only"])
 
             if selected_admin_hunter != "All Surveyors":
                 adm_outlets = df_outlets[df_outlets[hunter_col].astype(str) == selected_admin_hunter]
@@ -648,7 +644,6 @@ if active_file:
 
             adm_map = folium.Map(location=[26.8941, 80.9584], zoom_start=13)
 
-            # Show Admin GPS
             if surveyor_lat and surveyor_lon:
                 folium.Marker(
                     [surveyor_lat, surveyor_lon],
@@ -657,7 +652,6 @@ if active_file:
                     icon=folium.Icon(color="blue", icon="user", prefix="fa")
                 ).add_to(adm_map)
 
-            # Show All Active Surveyors Live Locations on Map
             df_s_locs = load_surveyor_locs()
             if not df_s_locs.empty:
                 for _, s_row in df_s_locs.iterrows():
@@ -679,7 +673,7 @@ if active_file:
 
             if map_status_filter != "📍 Surveyor Live Location Only":
                 for idx, row in adm_outlets.iterrows():
-                    out_name = str(row.get(outlet_col, f"Outlet_{idx}"))
+                    out_name = str(row.get(outlet_col, f"Target_{idx}"))
                     h_owner = str(row.get(hunter_col, "Unknown"))
                     lat, lon = row['out_lat'], row['out_lon']
 
@@ -730,7 +724,7 @@ if active_file:
                         filtered_resp_df = filtered_resp_df[(filtered_resp_df[date_col] >= start_d) & (filtered_resp_df[date_col] <= end_d)]
 
             if not filtered_resp_df.empty:
-                resp_outlet_col = next((c for c in filtered_resp_df.columns if "OUTLET" in c.upper()), None)
+                resp_outlet_col = next((c for c in filtered_resp_df.columns if "OUTLET" in c.upper() or "GROUP" in c.upper()), None)
                 filtered_completed_set = set(filtered_resp_df[resp_outlet_col].dropna().astype(str).tolist()) if resp_outlet_col else set()
             else:
                 filtered_completed_set = set()
@@ -746,9 +740,9 @@ if active_file:
 
                 progress_data.append({
                     "Surveyor Name": h_name,
-                    "Total Outlets Assigned": h_total,
-                    "Completed Points ✅": h_done,
-                    "Pending Points ⏳": h_pending,
+                    "Total Assigned": h_total,
+                    "Completed ✅": h_done,
+                    "Pending ⏳": h_pending,
                     "Completion %": f"{h_pct:.1f}%"
                 })
 
